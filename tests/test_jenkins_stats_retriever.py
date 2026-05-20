@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -66,7 +67,7 @@ def run_process(retriever, df):
         ),
         patch.object(retriever, "_upload_to_drive"),
     ):
-        retriever.process()
+        retriever.process(datetime(2026, 5, 20, tzinfo=UTC))
 
     return stats_resource_mock
 
@@ -170,9 +171,10 @@ def test_process_schema_and_pk(sample_configuration):
     create_args = resource_mock.create_datastore.call_args
     schema = create_args[0][0]
     pk = create_args[0][1]
-    assert pk == ("projectName",)
+    assert pk == ("date", "projectName")
     field_ids = [f["id"] for f in schema]
     assert field_ids == [
+        "date",
         "projectName",
         "num_runs",
         "num_successful",

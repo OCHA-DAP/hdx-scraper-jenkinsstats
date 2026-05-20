@@ -19,7 +19,7 @@ class JenkinsStatsRetriever:
         self._configuration = configuration
         self._downloader = downloader
 
-    def process(self) -> None:
+    def process(self, today) -> None:
         builds_dataset = Dataset.read_from_hdx(
             self._configuration["jenkins_builds_dataset"]
         )
@@ -49,6 +49,7 @@ class JenkinsStatsRetriever:
             )
             stats_records.append(
                 {
+                    "date": today.date().isoformat(),
                     "projectName": project_name,
                     "num_runs": num_runs,
                     "num_successful": num_successful,
@@ -60,6 +61,7 @@ class JenkinsStatsRetriever:
             )
 
         schema = [
+            {"id": "date", "type": "date"},
             {"id": "projectName", "type": "text"},
             {"id": "num_runs", "type": "int4"},
             {"id": "num_successful", "type": "int4"},
@@ -72,7 +74,8 @@ class JenkinsStatsRetriever:
             self._configuration["jenkins_stats_dataset"]
         )
         stats_resource = stats_dataset.get_resource()
-        stats_resource.create_datastore(schema, ("projectName",))
+        stats_resource.delete_datastore()
+        stats_resource.create_datastore(schema, ("date", "projectName"))
         stats_resource.update_datastore(stats_records)
 
         stats_dump_url = (
