@@ -6,6 +6,7 @@ the CSV to Google Drive.
 """
 
 import logging
+from os import getenv
 from os.path import expanduser, join
 from pathlib import Path
 
@@ -13,7 +14,7 @@ from hdx.api.configuration import Configuration
 from hdx.api.utilities.url_utils import get_ckan_ready_session
 from hdx.data.user import User
 from hdx.facades.simple import facade
-from hdx.utilities.dateparse import now_utc
+from hdx.utilities.dateparse import now_utc, parse_date
 from hdx.utilities.downloader import Download
 from hdx.utilities.path import script_dir_plus_file
 
@@ -30,11 +31,15 @@ def main() -> None:
     configuration = Configuration.read()
     today = now_utc()
 
+    start_from = None
+    if start_from_str := getenv("START_FROM"):
+        start_from = parse_date(start_from_str)
+
     User.check_current_user_write_access("hdx")
 
     session = get_ckan_ready_session(configuration)
     with Download(session=session) as downloader:
-        JenkinsStatsRetriever(configuration, downloader).process(today)
+        JenkinsStatsRetriever(configuration, downloader).process(today, start_from)
 
 
 if __name__ == "__main__":
