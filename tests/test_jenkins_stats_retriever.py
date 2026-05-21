@@ -97,9 +97,9 @@ def test_process_empty_dataframe(sample_configuration):
 def test_process_single_project_success(sample_configuration):
     retriever = make_retriever(sample_configuration)
     rows = [
-        ("proj-a", "SUCCESS", 60000, 1),
-        ("proj-a", "SUCCESS", 60000, 2),
-        ("proj-a", "SUCCESS", 60000, 3),
+        ("proj-a", "SUCCESS", 60, 1),
+        ("proj-a", "SUCCESS", 60, 2),
+        ("proj-a", "SUCCESS", 60, 3),
     ]
     _, resource_mock, _ = run_process(retriever, make_df(rows))
     records = resource_mock.update_datastore.call_args[0][0]
@@ -110,15 +110,17 @@ def test_process_single_project_success(sample_configuration):
     assert r["num_failed"] == 0
     assert r["num_aborted"] == 0
     assert r["success_rate"] == 100.0
+    assert r["failure_rate"] == 0.0
+    assert r["abort_rate"] == 0.0
 
 
 def test_process_mixed_results(sample_configuration):
     retriever = make_retriever(sample_configuration)
     rows = [
-        ("proj-a", "SUCCESS", 60000, 1),
-        ("proj-a", "SUCCESS", 60000, 2),
-        ("proj-a", "FAILURE", 30000, 3),
-        ("proj-a", "ABORTED", 10000, 4),
+        ("proj-a", "SUCCESS", 60, 1),
+        ("proj-a", "SUCCESS", 60, 2),
+        ("proj-a", "FAILURE", 30, 3),
+        ("proj-a", "ABORTED", 10, 4),
     ]
     _, resource_mock, _ = run_process(retriever, make_df(rows))
     records = resource_mock.update_datastore.call_args[0][0]
@@ -129,14 +131,16 @@ def test_process_mixed_results(sample_configuration):
     assert r["num_failed"] == 1
     assert r["num_aborted"] == 1
     assert r["success_rate"] == 50.0
+    assert r["failure_rate"] == 25.0
+    assert r["abort_rate"] == 25.0
 
 
 def test_process_multiple_projects(sample_configuration):
     retriever = make_retriever(sample_configuration)
     rows = [
-        ("proj-a", "SUCCESS", 60000, 1),
-        ("proj-b", "FAILURE", 30000, 2),
-        ("proj-b", "SUCCESS", 30000, 3),
+        ("proj-a", "SUCCESS", 60, 1),
+        ("proj-b", "FAILURE", 30, 2),
+        ("proj-b", "SUCCESS", 30, 3),
     ]
     _, resource_mock, _ = run_process(retriever, make_df(rows))
     records = resource_mock.update_datastore.call_args[0][0]
@@ -148,9 +152,9 @@ def test_process_multiple_projects(sample_configuration):
 def test_process_total_row(sample_configuration):
     retriever = make_retriever(sample_configuration)
     rows = [
-        ("proj-a", "SUCCESS", 60000, 1),
-        ("proj-a", "FAILURE", 30000, 2),
-        ("proj-b", "SUCCESS", 120000, 3),
+        ("proj-a", "SUCCESS", 60, 1),
+        ("proj-a", "FAILURE", 30, 2),
+        ("proj-b", "SUCCESS", 120, 3),
     ]
     _, resource_mock, _ = run_process(retriever, make_df(rows))
     records = resource_mock.update_datastore.call_args[0][0]
@@ -160,7 +164,10 @@ def test_process_total_row(sample_configuration):
     assert total["num_failed"] == 1
     assert total["num_aborted"] == 0
     assert total["success_rate"] == round(2 / 3 * 100, 2)
-    assert total["avg_duration"] == round((60000 + 30000 + 120000) / 3, 2)
+    assert total["failure_rate"] == round(1 / 3 * 100, 2)
+    assert total["abort_rate"] == 0.0
+    assert total["avg_duration"] == 90.0
+    assert total["stddev_duration"] == 42.43
 
 
 def test_process_build_date(sample_configuration):
@@ -168,9 +175,9 @@ def test_process_build_date(sample_configuration):
     today = datetime(2026, 5, 31, tzinfo=UTC)
     base = pd.Timestamp("2026-05-31", tz="UTC")
     rows = [
-        ("proj-a", "SUCCESS", 60000, 3),  # 2026-05-28
-        ("proj-a", "SUCCESS", 60000, 5),  # 2026-05-26
-        ("proj-b", "SUCCESS", 60000, 1),  # 2026-05-30
+        ("proj-a", "SUCCESS", 60, 3),  # 2026-05-28
+        ("proj-a", "SUCCESS", 60, 5),  # 2026-05-26
+        ("proj-b", "SUCCESS", 60, 1),  # 2026-05-30
     ]
     _, resource_mock, _ = run_process(
         retriever, make_df(rows, base_date=base), today=today
@@ -188,8 +195,8 @@ def test_process_build_date(sample_configuration):
 def test_process_filters_old_rows(sample_configuration):
     retriever = make_retriever(sample_configuration)
     rows = [
-        ("proj-a", "SUCCESS", 60000, 5),  # within last month
-        ("proj-a", "SUCCESS", 60000, 40),  # older than a month
+        ("proj-a", "SUCCESS", 60, 5),  # within last month
+        ("proj-a", "SUCCESS", 60, 40),  # older than a month
     ]
     _, resource_mock, _ = run_process(retriever, make_df(rows))
     records = resource_mock.update_datastore.call_args[0][0]
@@ -202,7 +209,7 @@ def test_process_backpopulate(sample_configuration):
     retriever = make_retriever(sample_configuration)
     # Build on 2026-04-30 falls in both monthly windows: Apr30 [03-30,05-01) and May31 [04-30,06-01)
     base = pd.Timestamp("2026-05-31", tz="UTC")
-    rows = [("proj-a", "SUCCESS", 60000, 31)]  # 2026-04-30
+    rows = [("proj-a", "SUCCESS", 60, 31)]  # 2026-04-30
     _, resource_mock, _ = run_process(
         retriever,
         make_df(rows, base_date=base),
@@ -218,7 +225,7 @@ def test_process_backpopulate(sample_configuration):
 def test_process_no_delete_datastore_without_start_from(sample_configuration):
     retriever = make_retriever(sample_configuration)
     _, resource_mock, _ = run_process(
-        retriever, make_df([("proj-a", "SUCCESS", 60000, 1)])
+        retriever, make_df([("proj-a", "SUCCESS", 60, 1)])
     )
     resource_mock.delete_datastore.assert_not_called()
 
@@ -231,12 +238,14 @@ def test_process_avg_duration(sample_configuration):
     ]
     _, resource_mock, _ = run_process(retriever, make_df(rows))
     records = resource_mock.update_datastore.call_args[0][0]
-    assert records[0]["avg_duration"] == 90.0
+    proj_a = next(r for r in records if r["projectName"] == "proj-a")
+    assert proj_a["avg_duration"] == 90.0
+    assert proj_a["stddev_duration"] == 42.43
 
 
 def test_process_uploads_dump(sample_configuration):
     retriever = make_retriever(sample_configuration)
-    rows = [("proj-a", "SUCCESS", 60000, 1)]
+    rows = [("proj-a", "SUCCESS", 60, 1)]
     _, resource_mock, _ = run_process(retriever, make_df(rows))
     assert retriever._downloader.download_file.call_count == 3
     resource_mock.set_file_to_upload.assert_called_once_with(
@@ -247,7 +256,7 @@ def test_process_uploads_dump(sample_configuration):
 
 def test_process_schema_and_pk(sample_configuration):
     retriever = make_retriever(sample_configuration)
-    rows = [("proj-a", "SUCCESS", 60000, 1)]
+    rows = [("proj-a", "SUCCESS", 60, 1)]
     _, resource_mock, _ = run_process(retriever, make_df(rows))
     create_args = resource_mock.create_datastore.call_args
     schema = create_args[0][0]
@@ -263,7 +272,10 @@ def test_process_schema_and_pk(sample_configuration):
         "num_failed",
         "num_aborted",
         "success_rate",
+        "failure_rate",
+        "abort_rate",
         "avg_duration",
+        "stddev_duration",
     ]
 
 
@@ -271,7 +283,7 @@ def test_process_monthly_on_month_end(sample_configuration):
     retriever = make_retriever(sample_configuration)
     _, resource_mock, _ = run_process(
         retriever,
-        make_df([("proj-a", "SUCCESS", 60000, 1)]),
+        make_df([("proj-a", "SUCCESS", 60, 1)]),
         today=datetime(2026, 5, 31, tzinfo=UTC),
     )
     resource_mock.create_datastore.assert_called_once()
@@ -281,7 +293,7 @@ def test_process_no_monthly_on_non_month_end(sample_configuration):
     retriever = make_retriever(sample_configuration)
     _, resource_mock, _ = run_process(
         retriever,
-        make_df([("proj-a", "SUCCESS", 60000, 1)]),
+        make_df([("proj-a", "SUCCESS", 60, 1)]),
         today=datetime(2026, 5, 20, tzinfo=UTC),
     )
     resource_mock.create_datastore.assert_not_called()
@@ -292,7 +304,7 @@ def test_process_quarterly_on_quarter_end(sample_configuration):
     retriever = make_retriever(sample_configuration)
     q1_end = datetime(2026, 3, 31, tzinfo=UTC)
     base = pd.Timestamp("2026-03-31", tz="UTC")
-    rows = [("proj-a", "SUCCESS", 60000, 1)]  # March 30 — within Q1
+    rows = [("proj-a", "SUCCESS", 60, 1)]  # March 30 — within Q1
     _, _, quarterly_mock = run_process(
         retriever, make_df(rows, base_date=base), today=q1_end
     )
@@ -305,7 +317,7 @@ def test_process_quarterly_on_quarter_end(sample_configuration):
 def test_process_no_quarterly_on_non_quarter_end(sample_configuration):
     retriever = make_retriever(sample_configuration)
     _, _, quarterly_mock = run_process(
-        retriever, make_df([("proj-a", "SUCCESS", 60000, 1)])
+        retriever, make_df([("proj-a", "SUCCESS", 60, 1)])
     )
     quarterly_mock.create_datastore.assert_not_called()
     quarterly_mock.update_datastore.assert_not_called()
@@ -317,9 +329,9 @@ def test_process_quarterly_window(sample_configuration):
     q1_end = datetime(2026, 3, 31, tzinfo=UTC)
     base = pd.Timestamp("2026-03-31", tz="UTC")
     rows = [
-        ("proj-a", "SUCCESS", 60000, 1),  # 2026-03-30 — in Q1
-        ("proj-a", "SUCCESS", 60000, 89),  # 2026-01-01 — in Q1 (boundary)
-        ("proj-a", "FAILURE", 60000, 91),  # 2025-12-30 — before Q1
+        ("proj-a", "SUCCESS", 60, 1),  # 2026-03-30 — in Q1
+        ("proj-a", "SUCCESS", 60, 89),  # 2026-01-01 — in Q1 (boundary)
+        ("proj-a", "FAILURE", 60, 91),  # 2025-12-30 — before Q1
     ]
     _, _, quarterly_mock = run_process(
         retriever, make_df(rows, base_date=base), today=q1_end
@@ -334,7 +346,7 @@ def test_process_backpopulate_quarterly(sample_configuration):
     # Backpopulation spanning a quarter-end should populate the quarterly resource
     retriever = make_retriever(sample_configuration)
     base = pd.Timestamp("2026-03-31", tz="UTC")
-    rows = [("proj-a", "SUCCESS", 60000, 1)]  # 2026-03-30 — in Q1
+    rows = [("proj-a", "SUCCESS", 60, 1)]  # 2026-03-30 — in Q1
     _, _, quarterly_mock = run_process(
         retriever,
         make_df(rows, base_date=base),
@@ -352,7 +364,7 @@ def test_process_backpopulate_no_quarterly_without_quarter_end(sample_configurat
     retriever = make_retriever(sample_configuration)
     _, _, quarterly_mock = run_process(
         retriever,
-        make_df([("proj-a", "SUCCESS", 60000, 1)]),
+        make_df([("proj-a", "SUCCESS", 60, 1)]),
         start_from=datetime(2026, 5, 18, tzinfo=UTC),
     )
     quarterly_mock.create_datastore.assert_not_called()
@@ -368,7 +380,7 @@ def test_process_fivebuilds_empty(sample_configuration):
 def test_process_fivebuilds_takes_last_5(sample_configuration):
     retriever = make_retriever(sample_configuration)
     # 10 builds for proj-a; only the 5 most recent should count
-    rows = [("proj-a", "SUCCESS", 60000, i) for i in range(1, 11)]
+    rows = [("proj-a", "SUCCESS", 60, i) for i in range(1, 11)]
     fivebuilds_mock, _, _ = run_process(retriever, make_df(rows))
     records = fivebuilds_mock.update_datastore.call_args[0][0]
     proj = next(r for r in records if r["projectName"] == "proj-a")
@@ -377,7 +389,7 @@ def test_process_fivebuilds_takes_last_5(sample_configuration):
 
 def test_process_fivebuilds_fewer_than_5(sample_configuration):
     retriever = make_retriever(sample_configuration)
-    rows = [("proj-a", "SUCCESS", 60000, i) for i in range(1, 4)]  # 3 builds
+    rows = [("proj-a", "SUCCESS", 60, i) for i in range(1, 4)]  # 3 builds
     fivebuilds_mock, _, _ = run_process(retriever, make_df(rows))
     records = fivebuilds_mock.update_datastore.call_args[0][0]
     proj = next(r for r in records if r["projectName"] == "proj-a")
@@ -387,11 +399,11 @@ def test_process_fivebuilds_fewer_than_5(sample_configuration):
 def test_process_fivebuilds_total_row(sample_configuration):
     retriever = make_retriever(sample_configuration)
     rows = [
-        ("proj-a", "SUCCESS", 60000, 1),
-        ("proj-a", "FAILURE", 30000, 2),
-        ("proj-b", "SUCCESS", 90000, 1),
-        ("proj-b", "SUCCESS", 90000, 2),
-        ("proj-b", "ABORTED", 90000, 3),
+        ("proj-a", "SUCCESS", 60, 1),
+        ("proj-a", "FAILURE", 30, 2),
+        ("proj-b", "SUCCESS", 90, 1),
+        ("proj-b", "SUCCESS", 90, 2),
+        ("proj-b", "ABORTED", 90, 3),
     ]
     fivebuilds_mock, _, _ = run_process(retriever, make_df(rows))
     records = fivebuilds_mock.update_datastore.call_args[0][0]
@@ -401,6 +413,8 @@ def test_process_fivebuilds_total_row(sample_configuration):
     assert total["num_failed"] == 1
     assert total["num_aborted"] == 1
     assert total["success_rate"] == 60.0
+    assert total["failure_rate"] == 20.0
+    assert total["abort_rate"] == 20.0
 
 
 def test_process_fivebuilds_historic(sample_configuration):
@@ -409,8 +423,8 @@ def test_process_fivebuilds_historic(sample_configuration):
     retriever = make_retriever(sample_configuration)
     base = pd.Timestamp("2026-05-20", tz="UTC")
     rows = [
-        ("proj-a", "SUCCESS", 60000, 1),  # 2026-05-19
-        ("proj-a", "SUCCESS", 60000, 0),  # 2026-05-20
+        ("proj-a", "SUCCESS", 60, 1),  # 2026-05-19
+        ("proj-a", "SUCCESS", 60, 0),  # 2026-05-20
     ]
     fivebuilds_mock, _, _ = run_process(
         retriever,
@@ -436,7 +450,7 @@ def test_process_fivebuilds_deletes_on_start_from(sample_configuration):
     retriever = make_retriever(sample_configuration)
     fivebuilds_mock, _, _ = run_process(
         retriever,
-        make_df([("proj-a", "SUCCESS", 60000, 1)]),
+        make_df([("proj-a", "SUCCESS", 60, 1)]),
         start_from=datetime(2026, 5, 19, tzinfo=UTC),
     )
     fivebuilds_mock.delete_datastore.assert_called_once()
@@ -445,7 +459,7 @@ def test_process_fivebuilds_deletes_on_start_from(sample_configuration):
 def test_process_fivebuilds_no_delete_without_start_from(sample_configuration):
     retriever = make_retriever(sample_configuration)
     fivebuilds_mock, _, _ = run_process(
-        retriever, make_df([("proj-a", "SUCCESS", 60000, 1)])
+        retriever, make_df([("proj-a", "SUCCESS", 60, 1)])
     )
     fivebuilds_mock.delete_datastore.assert_not_called()
 
@@ -453,7 +467,7 @@ def test_process_fivebuilds_no_delete_without_start_from(sample_configuration):
 def test_process_fivebuilds_pk(sample_configuration):
     retriever = make_retriever(sample_configuration)
     fivebuilds_mock, _, _ = run_process(
-        retriever, make_df([("proj-a", "SUCCESS", 60000, 1)])
+        retriever, make_df([("proj-a", "SUCCESS", 60, 1)])
     )
     pk = fivebuilds_mock.create_datastore.call_args[0][1]
     assert pk == ("stats_date", "projectName")

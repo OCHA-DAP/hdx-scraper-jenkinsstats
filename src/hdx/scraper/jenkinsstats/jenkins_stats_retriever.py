@@ -69,7 +69,10 @@ class JenkinsStatsRetriever:
             {"id": "num_failed", "type": "int4"},
             {"id": "num_aborted", "type": "int4"},
             {"id": "success_rate", "type": "float8"},
+            {"id": "failure_rate", "type": "float8"},
+            {"id": "abort_rate", "type": "float8"},
             {"id": "avg_duration", "type": "float8"},
+            {"id": "stddev_duration", "type": "float8"},
         ]
         stats_dataset = Dataset.read_from_hdx(
             self._configuration["jenkins_stats_dataset"]
@@ -172,7 +175,8 @@ class JenkinsStatsRetriever:
         num_successful = int((group["result"] == "SUCCESS").sum())
         num_failed = int((group["result"] == "FAILURE").sum())
         num_aborted = int((group["result"] == "ABORTED").sum())
-        durations = group["buildDuration"].dropna().astype(float)
+        successful_group = group[group["result"] == "SUCCESS"]
+        durations = successful_group["buildDuration"].dropna().astype(float)
         return {
             "stats_date": date_str,
             "projectName": project_name,
@@ -182,7 +186,10 @@ class JenkinsStatsRetriever:
             "num_failed": num_failed,
             "num_aborted": num_aborted,
             "success_rate": round(num_successful / num_runs * 100, 2),
+            "failure_rate": round(num_failed / num_runs * 100, 2),
+            "abort_rate": round(num_aborted / num_runs * 100, 2),
             "avg_duration": round(durations.mean(), 2) if not durations.empty else 0.0,
+            "stddev_duration": round(durations.std(), 2) if len(durations) > 1 else 0.0,
         }
 
     @staticmethod
@@ -191,7 +198,8 @@ class JenkinsStatsRetriever:
         total_successful = sum(r["num_successful"] for r in records)
         total_failed = sum(r["num_failed"] for r in records)
         total_aborted = sum(r["num_aborted"] for r in records)
-        all_durations = all_builds_df["buildDuration"].dropna().astype(float)
+        successful_builds = all_builds_df[all_builds_df["result"] == "SUCCESS"]
+        all_durations = successful_builds["buildDuration"].dropna().astype(float)
         records.append(
             {
                 "stats_date": date_str,
@@ -202,8 +210,13 @@ class JenkinsStatsRetriever:
                 "num_failed": total_failed,
                 "num_aborted": total_aborted,
                 "success_rate": round(total_successful / total_runs * 100, 2),
+                "failure_rate": round(total_failed / total_runs * 100, 2),
+                "abort_rate": round(total_aborted / total_runs * 100, 2),
                 "avg_duration": round(all_durations.mean(), 2)
                 if not all_durations.empty
+                else 0.0,
+                "stddev_duration": round(all_durations.std(), 2)
+                if len(all_durations) > 1
                 else 0.0,
             }
         )
