@@ -160,9 +160,7 @@ def test_process_total_row(sample_configuration):
     assert total["num_failed"] == 1
     assert total["num_aborted"] == 0
     assert total["success_rate"] == round(2 / 3 * 100, 2)
-    assert total["avg_duration_seconds"] == round(
-        (60000 + 30000 + 120000) / 3 / 1000, 2
-    )
+    assert total["avg_duration"] == round((60000 + 30000 + 120000) / 3, 2)
 
 
 def test_process_build_date(sample_configuration):
@@ -225,15 +223,15 @@ def test_process_no_delete_datastore_without_start_from(sample_configuration):
     resource_mock.delete_datastore.assert_not_called()
 
 
-def test_process_avg_duration_seconds(sample_configuration):
+def test_process_avg_duration(sample_configuration):
     retriever = make_retriever(sample_configuration)
     rows = [
-        ("proj-a", "SUCCESS", 60000, 1),
-        ("proj-a", "SUCCESS", 120000, 2),
+        ("proj-a", "SUCCESS", 60, 1),
+        ("proj-a", "SUCCESS", 120, 2),
     ]
     _, resource_mock, _ = run_process(retriever, make_df(rows))
     records = resource_mock.update_datastore.call_args[0][0]
-    assert records[0]["avg_duration_seconds"] == 90.0
+    assert records[0]["avg_duration"] == 90.0
 
 
 def test_process_uploads_dump(sample_configuration):
@@ -265,7 +263,7 @@ def test_process_schema_and_pk(sample_configuration):
         "num_failed",
         "num_aborted",
         "success_rate",
-        "avg_duration_seconds",
+        "avg_duration",
     ]
 
 

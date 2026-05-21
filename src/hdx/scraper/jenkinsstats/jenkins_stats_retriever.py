@@ -69,7 +69,7 @@ class JenkinsStatsRetriever:
             {"id": "num_failed", "type": "int4"},
             {"id": "num_aborted", "type": "int4"},
             {"id": "success_rate", "type": "float8"},
-            {"id": "avg_duration_seconds", "type": "float8"},
+            {"id": "avg_duration", "type": "float8"},
         ]
         stats_dataset = Dataset.read_from_hdx(
             self._configuration["jenkins_stats_dataset"]
@@ -182,9 +182,7 @@ class JenkinsStatsRetriever:
             "num_failed": num_failed,
             "num_aborted": num_aborted,
             "success_rate": round(num_successful / num_runs * 100, 2),
-            "avg_duration_seconds": round(durations.mean() / 1000, 2)
-            if not durations.empty
-            else 0.0,
+            "avg_duration": round(durations.mean(), 2) if not durations.empty else 0.0,
         }
 
     @staticmethod
@@ -204,7 +202,7 @@ class JenkinsStatsRetriever:
                 "num_failed": total_failed,
                 "num_aborted": total_aborted,
                 "success_rate": round(total_successful / total_runs * 100, 2),
-                "avg_duration_seconds": round(all_durations.mean() / 1000, 2)
+                "avg_duration": round(all_durations.mean(), 2)
                 if not all_durations.empty
                 else 0.0,
             }
