@@ -57,8 +57,12 @@ class JenkinsStatsRetriever:
             dates = [today]
 
         fivebuilds_records = []
+        fivebuilds_totals = []
         for date_ts in dates:
-            fivebuilds_records.extend(self._fivebuilds_stats(df, date_ts))
+            proj, total = self._fivebuilds_stats(df, date_ts)
+            fivebuilds_records.extend(proj)
+            if total is not None:
+                fivebuilds_totals.append(total)
 
         schema = [
             {"id": "stats_date", "type": "date"},
@@ -74,50 +78,90 @@ class JenkinsStatsRetriever:
             {"id": "avg_duration", "type": "float8"},
             {"id": "stddev_duration", "type": "float8"},
         ]
+        totals_schema = [f for f in schema if f["id"] != "projectName"]
         stats_dataset = Dataset.read_from_hdx(
             self._configuration["jenkins_stats_dataset"]
         )
 
         self._publish_resource(
-            stats_dataset.get_resource(),
+            stats_dataset,
             schema,
             fivebuilds_records,
             "jenkins_fivebuilds_stats.csv",
             start_from,
         )
+        self._publish_resource(
+            stats_dataset,
+            totals_schema,
+            fivebuilds_totals,
+            "jenkins_fivebuilds_stats_totals.csv",
+            start_from,
+            pk=("stats_date",),
+        )
 
         monthly_dates = [d for d in dates if _is_month_end(d.date())]
         if monthly_dates:
             stats_records = []
+            monthly_totals = []
             for date_ts in monthly_dates:
-                stats_records.extend(self._stats_for_date(df, date_ts))
+                proj, total = self._stats_for_date(df, date_ts)
+                stats_records.extend(proj)
+                if total is not None:
+                    monthly_totals.append(total)
             self._publish_resource(
-                stats_dataset.get_resource(1),
+                stats_dataset,
                 schema,
                 stats_records,
                 "jenkins_monthly_stats.csv",
                 start_from,
             )
+            self._publish_resource(
+                stats_dataset,
+                totals_schema,
+                monthly_totals,
+                "jenkins_monthly_stats_totals.csv",
+                start_from,
+                pk=("stats_date",),
+            )
 
         quarterly_dates = [d for d in dates if _is_quarter_end(d.date())]
         if quarterly_dates:
             quarterly_records = []
+            quarterly_totals = []
             for date_ts in quarterly_dates:
-                quarterly_records.extend(self._quarterly_stats_for_date(df, date_ts))
+                proj, total = self._quarterly_stats_for_date(df, date_ts)
+                quarterly_records.extend(proj)
+                if total is not None:
+                    quarterly_totals.append(total)
             self._publish_resource(
-                stats_dataset.get_resource(2),
+                stats_dataset,
                 schema,
                 quarterly_records,
                 "jenkins_quarterly_stats.csv",
                 start_from,
             )
+            self._publish_resource(
+                stats_dataset,
+                totals_schema,
+                quarterly_totals,
+                "jenkins_quarterly_stats_totals.csv",
+                start_from,
+                pk=("stats_date",),
+            )
 
     def _publish_resource(
-        self, resource, schema, records, filename, start_from
+        self,
+        dataset,
+        schema,
+        records,
+        filename,
+        start_from,
+        pk=("stats_date", "projectName"),
     ) -> None:
+        resource = next(r for r in dataset.get_resources() if r["name"] == filename)
         if start_from is not None:
             resource.delete_datastore()
-        resource.create_datastore(schema, ("stats_date", "projectName"))
+        resource.create_datastore(schema, pk)
         resource.update_datastore(records)
         dump_url = (
             f"{self._configuration.get_hdx_site_url()}/datastore/dump/{resource['id']}"
@@ -128,35 +172,33 @@ class JenkinsStatsRetriever:
         resource.update_in_hdx()
         self._upload_to_drive(file)
 
-    def _stats_for_date(self, df, date_ts) -> list:
-        cutoff = pd.Timestamp(date_ts) - pd.DateOffset(months=1)
-        upper = pd.Timestamp(date_ts) + pd.Timedelta(days=1)
+    def _stats_for_date(self, df, date_ts) -> tuple[list, dict | None]:
+        midnight = date_ts.replace(hour=0, minute=0, second=0, microsecond=0)
+        cutoff = pd.Timestamp(midnight.replace(day=1))
+        upper = pd.Timestamp(midnight) + pd.Timedelta(days=1)
         return self._compute_stats(df, date_ts, cutoff, upper)
 
-    def _quarterly_stats_for_date(self, df, date_ts) -> list:
-        quarter_start = date_ts.replace(
-            month=date_ts.month - 2, day=1, hour=0, minute=0, second=0, microsecond=0
-        )
-        cutoff = pd.Timestamp(quarter_start)
-        upper = pd.Timestamp(date_ts) + pd.Timedelta(days=1)
+    def _quarterly_stats_for_date(self, df, date_ts) -> tuple[list, dict | None]:
+        midnight = date_ts.replace(hour=0, minute=0, second=0, microsecond=0)
+        cutoff = pd.Timestamp(midnight.replace(month=midnight.month - 2, day=1))
+        upper = pd.Timestamp(midnight) + pd.Timedelta(days=1)
         return self._compute_stats(df, date_ts, cutoff, upper)
 
-    def _compute_stats(self, df, date_ts, cutoff, upper) -> list:
+    def _compute_stats(self, df, date_ts, cutoff, upper) -> tuple[list, dict | None]:
         if df.empty:
-            return []
+            return [], None
         filtered = df[(df["buildTimestamp"] >= cutoff) & (df["buildTimestamp"] < upper)]
         date_str = date_ts.date().isoformat()
         records = [
             self._stats_record(date_str, project_name, group)
             for project_name, group in filtered.groupby("projectName")
         ]
-        if records:
-            self._append_total_row(records, date_str, filtered)
-        return records
+        total = self._build_total_row(records, date_str, filtered) if records else None
+        return records, total
 
-    def _fivebuilds_stats(self, df, date_ts) -> list:
+    def _fivebuilds_stats(self, df, date_ts) -> tuple[list, dict | None]:
         if df.empty:
-            return []
+            return [], None
         upper = pd.Timestamp(date_ts) + pd.Timedelta(days=1)
         eligible = df[df["buildTimestamp"] < upper]
         date_str = date_ts.date().isoformat()
@@ -165,9 +207,8 @@ class JenkinsStatsRetriever:
             self._stats_record(date_str, project_name, group)
             for project_name, group in last5_df.groupby("projectName")
         ]
-        if records:
-            self._append_total_row(records, date_str, last5_df)
-        return records
+        total = self._build_total_row(records, date_str, last5_df) if records else None
+        return records, total
 
     @staticmethod
     def _stats_record(date_str: str, project_name: str, group) -> dict:
@@ -193,33 +234,30 @@ class JenkinsStatsRetriever:
         }
 
     @staticmethod
-    def _append_total_row(records: list, date_str: str, all_builds_df) -> None:
+    def _build_total_row(records: list, date_str: str, all_builds_df) -> dict:
         total_runs = sum(r["num_runs"] for r in records)
         total_successful = sum(r["num_successful"] for r in records)
         total_failed = sum(r["num_failed"] for r in records)
         total_aborted = sum(r["num_aborted"] for r in records)
         successful_builds = all_builds_df[all_builds_df["result"] == "SUCCESS"]
         all_durations = successful_builds["buildDuration"].dropna().astype(float)
-        records.append(
-            {
-                "stats_date": date_str,
-                "projectName": "TOTAL",
-                "build_date": max(r["build_date"] for r in records),
-                "num_runs": total_runs,
-                "num_successful": total_successful,
-                "num_failed": total_failed,
-                "num_aborted": total_aborted,
-                "success_rate": round(total_successful / total_runs * 100, 2),
-                "failure_rate": round(total_failed / total_runs * 100, 2),
-                "abort_rate": round(total_aborted / total_runs * 100, 2),
-                "avg_duration": round(all_durations.mean(), 2)
-                if not all_durations.empty
-                else 0.0,
-                "stddev_duration": round(all_durations.std(), 2)
-                if len(all_durations) > 1
-                else 0.0,
-            }
-        )
+        return {
+            "stats_date": date_str,
+            "build_date": max(r["build_date"] for r in records),
+            "num_runs": total_runs,
+            "num_successful": total_successful,
+            "num_failed": total_failed,
+            "num_aborted": total_aborted,
+            "success_rate": round(total_successful / total_runs * 100, 2),
+            "failure_rate": round(total_failed / total_runs * 100, 2),
+            "abort_rate": round(total_aborted / total_runs * 100, 2),
+            "avg_duration": round(all_durations.mean(), 2)
+            if not all_durations.empty
+            else 0.0,
+            "stddev_duration": round(all_durations.std(), 2)
+            if len(all_durations) > 1
+            else 0.0,
+        }
 
     def _upload_to_drive(self, file: Path) -> None:
         if self._drive_service is None:
