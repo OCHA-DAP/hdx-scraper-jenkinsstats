@@ -46,6 +46,10 @@ class JenkinsStatsRetriever:
         if not df.empty:
             df["buildTimestamp"] = pd.to_datetime(df["buildTimestamp"], utc=True)
             df = df.sort_values("buildTimestamp", ascending=False)
+            if "cause" in df.columns:
+                df = df[
+                    df["cause"].isna() | (df["cause"] == "") | (df["cause"] == "timer")
+                ]
 
         dates = []
         if start_from is not None:
@@ -75,6 +79,7 @@ class JenkinsStatsRetriever:
             {"id": "success_rate", "type": "float8"},
             {"id": "failure_rate", "type": "float8"},
             {"id": "abort_rate", "type": "float8"},
+            {"id": "failure_abort_rate", "type": "float8"},
             {"id": "avg_duration", "type": "float8"},
             {"id": "stddev_duration", "type": "float8"},
         ]
@@ -166,10 +171,11 @@ class JenkinsStatsRetriever:
         dump_url = (
             f"{self._configuration.get_hdx_site_url()}/datastore/dump/{resource['id']}"
         )
+        resource["url"] = dump_url
+        resource.pop("url_type", None)
+        resource.update_in_hdx()
         file = self._downloader.download_file(dump_url)
         file = file.rename(file.parent / filename)
-        resource.set_file_to_upload(file)
-        resource.update_in_hdx()
         self._upload_to_drive(file)
 
     def _stats_for_date(self, df, date_ts) -> tuple[list, dict | None]:
@@ -229,6 +235,7 @@ class JenkinsStatsRetriever:
             "success_rate": round(num_successful / num_runs * 100, 2),
             "failure_rate": round(num_failed / num_runs * 100, 2),
             "abort_rate": round(num_aborted / num_runs * 100, 2),
+            "failure_abort_rate": round((num_failed + num_aborted) / num_runs * 100, 2),
             "avg_duration": round(durations.mean(), 2) if not durations.empty else 0.0,
             "stddev_duration": round(durations.std(), 2) if len(durations) > 1 else 0.0,
         }
@@ -251,6 +258,9 @@ class JenkinsStatsRetriever:
             "success_rate": round(total_successful / total_runs * 100, 2),
             "failure_rate": round(total_failed / total_runs * 100, 2),
             "abort_rate": round(total_aborted / total_runs * 100, 2),
+            "failure_abort_rate": round(
+                (total_failed + total_aborted) / total_runs * 100, 2
+            ),
             "avg_duration": round(all_durations.mean(), 2)
             if not all_durations.empty
             else 0.0,

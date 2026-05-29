@@ -24,17 +24,21 @@ def make_retriever(sample_configuration):
 
 
 def make_df(rows, base_date=None):
-    """rows: list of (projectName, result, buildDuration, days_ago)"""
+    """rows: list of (projectName, result, buildDuration, days_ago[, cause])"""
     base = base_date if base_date is not None else pd.Timestamp.now(tz="UTC")
-    data = [
-        {
-            "projectName": project,
-            "result": result,
-            "buildDuration": duration,
-            "buildTimestamp": (base - pd.Timedelta(days=days_ago)).isoformat(),
-        }
-        for project, result, duration, days_ago in rows
-    ]
+    data = []
+    for row in rows:
+        project, result, duration, days_ago = row[:4]
+        cause = row[4] if len(row) > 4 else None
+        data.append(
+            {
+                "projectName": project,
+                "result": result,
+                "buildDuration": duration,
+                "buildTimestamp": (base - pd.Timedelta(days=days_ago)).isoformat(),
+                "cause": cause,
+            }
+        )
     return pd.DataFrame(data)
 
 
@@ -218,6 +222,23 @@ def test_process_build_date(sample_configuration):
     assert total["build_date"] == "2026-05-30"  # most recent across all scrapers
 
 
+def test_process_filters_non_scheduled_runs(sample_configuration):
+    retriever = make_retriever(sample_configuration)
+    rows = [
+        ("proj-a", "SUCCESS", 60, 1, "timer"),  # scheduled — include
+        ("proj-a", "FAILURE", 30, 2, None),  # blank (pre-28/04/2026) — include
+        ("proj-a", "FAILURE", 30, 3, ""),  # blank — include
+        ("proj-a", "SUCCESS", 60, 4, "user"),  # manual — exclude
+        ("proj-a", "SUCCESS", 60, 5, "upstream"),  # triggered — exclude
+    ]
+    _, resource_mock, _, _, _, _ = run_process(retriever, make_df(rows))
+    records = resource_mock.update_datastore.call_args[0][0]
+    proj = next(r for r in records if r["projectName"] == "proj-a")
+    assert proj["num_runs"] == 3
+    assert proj["num_successful"] == 1
+    assert proj["num_failed"] == 2
+
+
 def test_process_filters_old_rows(sample_configuration):
     retriever = make_retriever(sample_configuration)
     rows = [
@@ -275,9 +296,6 @@ def test_process_uploads_dump(sample_configuration):
     _, resource_mock, _, _, _, _ = run_process(retriever, make_df(rows))
     # 1 builds download + 2 fivebuilds (main+totals) + 2 monthly (main+totals) = 5
     assert retriever._downloader.download_file.call_count == 5
-    resource_mock.set_file_to_upload.assert_called_once_with(
-        Path("/tmp/jenkins_monthly_stats.csv")
-    )
     resource_mock.update_in_hdx.assert_called_once()
 
 
@@ -301,6 +319,7 @@ def test_process_schema_and_pk(sample_configuration):
         "success_rate",
         "failure_rate",
         "abort_rate",
+        "failure_abort_rate",
         "avg_duration",
         "stddev_duration",
     ]
