@@ -25,7 +25,7 @@ def make_retriever(sample_configuration):
 
 def make_df(rows, base_date=None):
     """rows: list of (projectName, result, buildDuration, days_ago[, cause])"""
-    base = base_date if base_date is not None else pd.Timestamp.now(tz="UTC")
+    base = base_date if base_date is not None else pd.Timestamp("2026-05-31", tz="UTC")
     data = []
     for row in rows:
         project, result, duration, days_ago = row[:4]
