@@ -102,6 +102,10 @@ def run_process(
             "hdx.scraper.jenkinsstats.jenkins_stats_retriever.pd.read_csv",
             return_value=df,
         ),
+        patch(
+            "hdx.scraper.jenkinsstats.jenkins_stats_retriever.get_size_and_hash",
+            return_value=(0, "test-hash"),
+        ),
         patch.object(retriever, "_upload_to_drive"),
     ):
         retriever.process(today, start_from)
